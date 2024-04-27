@@ -1,0 +1,186 @@
+---
+title: "BA_FinalExam"
+author: "Snehitha Anpur"
+date: "2022-11-25"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Data Loading
+
+```{r}
+
+library(dplyr)
+
+library(caret)
+
+Churndata=read.csv("D:\\MSBA\\rTutorial\\Rtutorial\\Churn_Train.csv") # Reading CSV file
+
+load("Customers_To_Predict.RData") # Loading the data of RData file
+
+set.seed(1234) # Setting Seed value
+
+```
+
+Converting the categorical data of character type to factor type
+
+```{r}
+
+Churndata$state = as.factor(Churndata$state)
+
+Churndata$area_code = as.factor(Churndata$area_code)
+
+Churndata$international_plan = as.factor(Churndata$international_plan)
+
+Churndata$voice_mail_plan = as.factor(Churndata$voice_mail_plan)
+
+Churndata$churn = as.factor(Churndata$churn)
+
+```
+
+Data Cleaning
+
+```{r}
+
+library(mice)
+
+colMeans(is.na(Churndata))*100 # Checking for null values percentage
+
+Imputed_Churn <- mice(Churndata, m=2, maxit = 10, method = 'pmm', seed = 500) # Imputing the null values
+
+Imputed_churndata <- complete(Imputed_Churn,2) # Using the 5th dataset for this project
+
+mice:::find.collinear(Imputed_churndata) # Checking for the Collinearity or correlation
+
+Cleaned_Churndata= Imputed_churndata[,-c(7,15,18)] # Removing the Correlated columns
+
+```
+
+Data Exploring
+
+```{r}
+
+library(corrplot)
+
+library(ggplot2)
+
+library(cowplot)
+
+churn_yes = Cleaned_Churndata[Cleaned_Churndata$churn=='yes',] # Filtering the data for Churn="yes"
+
+Area_code = ggplot(churn_yes, aes(x=area_code, fill=churn)) + geom_bar(position="dodge")
+
+International_plan = ggplot(churn_yes, aes(x=international_plan, fill=churn)) + geom_bar(position="dodge")
+
+Voice_mail_plan = ggplot(churn_yes, aes(x=voice_mail_plan, fill=churn)) + geom_bar(position="dodge")
+
+plot_grid(Area_code,International_plan,Voice_mail_plan) # plotting the Categorical Variables
+
+p=table( churn_yes$churn,churn_yes$state) 
+
+corrplot(cor(churn_yes[, c(2,6:16)])) # Correlation plot for the numerical variables
+
+```
+
+Data Partition 
+
+```{r}
+
+Test_Data_label = createDataPartition(Cleaned_Churndata$churn,p=0.30,list = FALSE)  # Creating the Partition for Train and Test data
+
+Train_Data = Cleaned_Churndata[-Test_Data_label,] # Train Data
+
+Test_Data = Cleaned_Churndata[Test_Data_label,] # Test Data
+
+```
+
+Data is partitioned as Train and Test data to check for the Model which suits best for this dataset
+
+Data Modelling
+
+Multiple Regression
+
+In Multiple Regression , It deals with Continuous Variables, Where as our dataset has binary target values. With this type when we use Anova method we see sum of squares has high for residuals. Hence Mutliple Regression is not the best model for this dataset
+
+
+Logistic Regression
+
+```{r}
+
+library(caTools)
+
+library(ROCR)    
+
+LR = glm(churn ~ ., data = Train_Data,family = "binomial")# Running Logistic Regression Model
+
+Predict_LR = predict(LR, newdata = Test_Data,type = "response") #Predicting with test data
+
+pred = prediction(Predict_LR,Test_Data$churn)
+
+recall_perf = performance(pred, measure = "rec") # Measuring the Recall Performance
+
+plot(recall_perf)
+
+Predict_LR1=  ifelse(Predict_LR>0.2,'yes','no') #Setting up cutoff value
+
+confusionMatrix(as.factor(Predict_LR1),as.factor(Test_Data$churn)) # Running Confusion Matrix
+
+```
+
+Decision Tree
+
+```{r}
+
+library(rattle)
+
+library(rpart)
+
+library(rpart.plot)
+
+DT = rpart(churn~., data = Train_Data, method = 'class', control=rpart.control(minsplit = 20)) # Running Decision Model
+
+best_CP = DT$cptable[which.min(DT$cptable[,"xerror"]),"CP"] #Finding the Best CP
+
+Best_DT = rpart(churn~., data = Cleaned_Churndata, method = 'class',control=rpart.control(cp=.01)) # Running the Decision tree model with the best CP
+
+predict_DT = predict(Best_DT, newdata = Test_Data, type = 'class') #Predicting with test data
+
+confusionMatrix(as.factor(predict_DT),as.factor(Test_Data$churn)) # Running Confusion Matrix
+
+```
+From the above Model, We can see that Decision Tree Model is the best fit for this Data set having the accuracy of 94%, Sensitivity 68.9% and  specificity 98% which is better than Logistic regression having the accuracy 80%, sensitivity 60.6 % and specificity 83.7
+
+Note:  confusionMatrix function has provided sensitivity and specificity results in the reverse order
+
+Hence, running the Decision Tree Model for the Entire Data set
+
+Final Decision Tree
+
+```{r}
+
+Churn_Model = rpart(churn~., data = Cleaned_Churndata, method = 'class') # Running Decision tree Model
+
+best_CP = Churn_Model$cptable[which.min(Churn_Model$cptable[,"xerror"]),"CP"] # Finding best Cp
+
+Best_Churn_Model=rpart(churn~., data = Cleaned_Churndata, method = 'class',control=rpart.control(cp=.01))  # Running Decision Tree with the best cp value
+
+pruned_Churn_tree <- prune(Churn_Model, cp=best_CP) # Pruning the tree to avoid Over fitting
+
+prp(pruned_Churn_tree,faclen=0,extra=1, roundint=F, digits=5) 
+
+```
+
+```{r}
+
+fancyRpartPlot(Best_Churn_Model) # Running the Fancy RPlot for the Best_churn_model
+
+predict_churn = predict(Best_Churn_Model, newdata = Customers_To_Predict, type='class') 
+
+predict_churn = as.data.frame(predict_churn)
+
+Customers_To_Predict = cbind(Customers_To_Predict,predict_churn) # Binding Customers_To_Predict with the Predicted churn data
+```
+
