@@ -1,6 +1,6 @@
 ---
 title: "BA_FinalExam"
-author: "Snehitha Anpur"
+author: "Sony Kiran"
 date: "2022-11-25"
 output: pdf_document
 ---
